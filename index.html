@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+    <title>Smart Zoom Viewer</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    
+    <style>
+        body, html {
+            margin: 0; padding: 0;
+            width: 100%; height: 100%;
+            background-color: #ffffff;
+            /* 기본적으로 오버플로우 숨김 (컨테이너에서 제어) */
+            overflow: hidden; 
+        }
+
+        #container {
+            display: flex;
+            width: 100%;
+            height: 100%;
+            overflow-x: auto;
+            overflow-y: hidden;
+            
+            /* [기본 상태] 한 장씩 딱딱 걸리게 설정 */
+            scroll-snap-type: x mandatory; 
+            
+            scroll-behavior: smooth;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        /* [중요] 확대되었을 때 적용할 클래스 
+           자바스크립트가 확대를 감지하면 이 클래스를 container에 붙입니다.
+        */
+        #container.zoomed {
+            /* 스냅 기능 해제 -> 확대 시 자유롭게 이동 가능 */
+            scroll-snap-type: none !important; 
+            overflow-x: auto !important;
+            overflow-y: auto !important;
+        }
+
+        .page {
+            flex: 0 0 100vw; 
+            height: 100vh;
+            scroll-snap-align: start;
+            scroll-snap-stop: always;
+            
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+
+        canvas {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            /* 그림자 없이 깔끔하게 */
+            box-shadow: none; 
+        }
+
+        #loader {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            color: #333;
+            font-size: 1.1rem;
+            z-index: 100;
+        }
+
+        #page-num {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.3);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 13px;
+            z-index: 200;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="loader">문서 로딩 중...</div>
+    <div id="page-num">1 / --</div>
+    <div id="container"></div>
+
+    <script>
+        // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
+        var pdfUrl = 'manual_1.pdf'; // 파일명 확인
+        // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+        
+        const container = document.getElementById('container');
+        const loader = document.getElementById('loader');
+        const pageNumDiv = document.getElementById('page-num');
+
+        // [핵심 기능] 줌 상태 감지하여 스냅 끄기/켜기
+        if (window.visualViewport) {
+            const viewport = window.visualViewport;
+            
+            function handleZoom() {
+                // scale이 1.0보다 크면(확대됨) -> 스냅 끄기
+                if (viewport.scale > 1.01) {
+                    container.classList.add('zoomed');
+                } else {
+                    // scale이 1.0이면(원래 크기) -> 스냅 켜기
+                    container.classList.remove('zoomed');
+                }
+            }
+
+            // 확대/축소 이벤트 리스너
+            viewport.addEventListener('resize', handleZoom);
+            viewport.addEventListener('scroll', handleZoom);
+        }
+
+        async function renderPDF() {
+            try {
+                const pdf = await pdfjsLib.getDocument(pdfUrl).promise;
+                const total = pdf.numPages;
+                pageNumDiv.innerText = `1 / ${total}`;
+
+                for (let i = 1; i <= total; i++) {
+                    const page = await pdf.getPage(i);
+                    // 확대해도 깨지지 않게 3배 고해상도
+                    const viewport = page.getViewport({ scale: 3 });
+
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    canvas.width = viewport.width;
+                    canvas.height = viewport.height;
+                    
+                    canvas.style.width = "auto";
+                    canvas.style.height = "auto";
+                    canvas.style.maxWidth = "100%";
+                    canvas.style.maxHeight = "100%";
+
+                    await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+
+                    const div = document.createElement('div');
+                    div.className = 'page';
+                    div.appendChild(canvas);
+                    container.appendChild(div);
+                }
+
+                loader.style.display = 'none';
+
+                container.addEventListener('scroll', () => {
+                    // 확대 상태가 아닐 때만 페이지 번호 갱신 계산
+                    if (!container.classList.contains('zoomed')) {
+                        const pageIndex = Math.round(container.scrollLeft / window.innerWidth) + 1;
+                        pageNumDiv.innerText = `${pageIndex} / ${total}`;
+                    }
+                });
+
+            } catch (err) {
+                loader.innerText = "에러: " + err.message;
+            }
+        }
+        renderPDF();
+    </script>
+</body>
+</html>
